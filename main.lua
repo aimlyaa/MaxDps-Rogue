@@ -1,4 +1,4 @@
-﻿--- @type MaxDps
+--- @type MaxDps
 if not MaxDps then
 	return ;
 end
@@ -141,13 +141,14 @@ setmetatable(SB, spellMeta);
 setmetatable(A, spellMeta);
 
 function Rogue:Enable()
-	MaxDps:Print(MaxDps.Colors.Info .. 'Rogue [Outlaw]');
-
 	if MaxDps.Spec == 1 then
+		MaxDps:Print(MaxDps.Colors.Info .. 'Rogue [Assassination]');
 		MaxDps.NextSpell = Rogue.Assassination;
 	elseif MaxDps.Spec == 2 then
+		MaxDps:Print(MaxDps.Colors.Info .. 'Rogue [Outlaw]');
 		MaxDps.NextSpell = Rogue.Outlaw;
 	elseif MaxDps.Spec == 3 then
+		MaxDps:Print(MaxDps.Colors.Info .. 'Rogue [Subtlety]');
 		MaxDps.NextSpell = Rogue.Subtlety;
 	end
 
@@ -203,7 +204,7 @@ function Rogue:Assassination()
 	local comboDeficit = comboMax - combo;
 	local spellHaste = MaxDps:AttackHaste();
 	local targets = MaxDps:SmartAoe();
-	local cpMaxSpend = 5 + (talents[AS.DeeperStratagem] and 1 or 0);
+	local cpMaxSpend = 5 + (talents[AS.DeeperStratagem] and 1 or 0); --????????????? it`s the same that comboMax
 
 	local stealthed = buff[AS.StealthAura].up or buff[AS.StealthAlt].up or buff[AS.VanishAura].up;
 	local poisonedBleeds = Rogue:PoisonedBleeds(timeShift);
@@ -216,17 +217,25 @@ function Rogue:Assassination()
 	-- vendetta,if=!stealthed.rogue&dot.rupture.ticking&(!talent.subterfuge.enabled|!azerite.shrouded_suffocation.enabled|dot.garrote.pmultiplier>1)&(!talent.nightstalker.enabled|!talent.exsanguinate.enabled|cooldown.exsanguinate.remains<5-2*talent.deeper_stratagem.enabled);
 	MaxDps:GlowCooldown(
 		AS.Vendetta,
-		cooldown[AS.Vendetta].ready and not stealthed and
-		debuff[AS.Rupture].up and energy < 80
+		cooldown[AS.Vendetta].ready and 
+		not stealthed and
+		debuff[AS.Rupture].up and
+		((energyMax - energy) >= 20 or combo >=4) 
 	);
 
-	MaxDps:GlowCooldown(AS.Vanish, cooldown[AS.Vanish].ready and not stealthed);
+	MaxDps:GlowCooldown(
+		AS.Vanish, 
+		cooldown[AS.Vanish].ready and 
+		not stealthed and 
+		debuff[AS.Garrote].remains <= 2 and
+		InCombatLockdown()
+		);
 
 	if not buff[AS.DeadlyPoison].up then
 		return AS.DeadlyPoison;
 	end
 
-	if not InCombatLockdown() and buff[AS.DeadlyPoison].remains < 5 * 60 then
+	if not InCombatLockdown() and buff[AS.DeadlyPoison].remains < 300 then -- Deadly Poison remain < 300s (5 min)
 		return AS.DeadlyPoison;
 	end
 
@@ -240,7 +249,7 @@ function Rogue:Assassination()
 	end
 
 	-- marked_for_death,target_if=min:target.time_to_die,if=raid_event.adds.up&(target.time_to_die<combo_points.deficit*1.5|combo_points.deficit>=cp_max_spend);
-	if talents[AS.MarkedForDeath] and cooldown[AS.MarkedForDeath].ready and (comboDeficit >= cpMaxSpend) then
+	if talents[AS.MarkedForDeath] and cooldown[AS.MarkedForDeath].ready and (comboDeficit == cpMaxSpend) then
 		return AS.MarkedForDeath;
 	end
 
@@ -256,9 +265,10 @@ function Rogue:Assassination()
 
 	--actions.dot+=/garrote,cycle_targets=1,if=(!talent.subterfuge.enabled|!(cooldown.vanish.up&cooldown.vendetta.remains<=4))&combo_points.deficit>=1&refreshable&(pmultiplier<=1|remains<=tick_time&spell_targets.fan_of_knives>=3+azerite.shrouded_suffocation.enabled)&(!exsanguinated|remains<=tick_time*2&spell_targets.fan_of_knives>=3+azerite.shrouded_suffocation.enabled)&(target.time_to_die-remains>4&spell_targets.fan_of_knives<=1|target.time_to_die-remains>12)
 	if cooldown[AS.Garrote].ready and
-		(not talents[AS.Subterfuge] or not (cooldown[AS.Vanish].ready and cooldown[AS.Vendetta].remains <= 4)) and
+		(not talents[AS.Subterfuge] or not (cooldown[AS.Vanish].ready or cooldown[AS.Vendetta].remains <= 4)) and
 		comboDeficit >= 1 and
-		debuff[AS.Garrote].refreshable
+		debuff[AS.Garrote].remains <= 2
+		
 	then
 		return AS.Garrote;
 	end
@@ -273,7 +283,7 @@ function Rogue:Assassination()
 	end
 
 	--actions.dot+=/rupture,cycle_targets=1,if=combo_points>=4&refreshable&(pmultiplier<=1|remains<=tick_time&spell_targets.fan_of_knives>=3+azerite.shrouded_suffocation.enabled)&(!exsanguinated|remains<=tick_time*2&spell_targets.fan_of_knives>=3+azerite.shrouded_suffocation.enabled)&target.time_to_die-remains>4
-	if combo >= 4 and debuff[AS.Rupture].refreshable then
+	if combo >= 4 and debuff[AS.Rupture].remains <= 3 and not stealthed then
 		return AS.Rupture;
 	end
 
@@ -288,7 +298,7 @@ function Rogue:Assassination()
 	end
 
 	-- toxic_blade,if=dot.rupture.ticking;
-	if talents[AS.ToxicBlade] and cooldown[AS.ToxicBlade].ready and debuff[AS.Rupture].up then
+	if talents[AS.ToxicBlade] and cooldown[AS.ToxicBlade].ready and debuff[AS.Rupture].up and comboDeficit >= 1 then
 		return AS.ToxicBlade;
 	end
 
@@ -364,7 +374,7 @@ function Rogue:AssassinationDirect()
 
 	-- envenom,if=combo_points>=4+talent.deeper_stratagem.enabled&(debuff.vendetta.up|debuff.toxic_blade.up|energy.deficit<=25+variable.energy_regen_combined|!variable.single_target)&(!talent.exsanguinate.enabled|cooldown.exsanguinate.remains>2);
 	if combo >= 4 + (talents[AS.DeeperStratagem] and 1 or 0) and
-		(debuff[AS.Vendetta].up or debuff[AS.ToxicBlade].up or energyDeficit <= 25 + energyRegenCombined or targets >= 2) and
+		((debuff[AS.Vendetta].up or not cooldown[AS.Vendetta].ready) or (debuff[AS.ToxicBlade].up or not cooldown[AS.ToxicBlade].ready) or energyDeficit <= 25 + energyRegenCombined) and
 		(not talents[AS.Exsanguinate] or cooldown[AS.Exsanguinate].remains > 2)
 	then
 		return AS.Envenom;
@@ -426,8 +436,8 @@ function Rogue:AssassinationStealthed()
 	end
 
 	-- rupture,if=talent.subterfuge.enabled&azerite.shrouded_suffocation.enabled&!dot.rupture.ticking;
-	if effectiveEnergy >= 25 and combo >= 1 and
-		talents[AS.Subterfuge] and
+	if effectiveEnergy >= 25 and combo >= 1 and 
+		not talents[AS.Subterfuge] and
 		azerite[A.ShroudedSuffocation] > 0 and
 		not debuff[AS.Rupture].up
 	then
@@ -444,7 +454,9 @@ function Rogue:AssassinationStealthed()
 		return AS.Garrote;
 	end
 
-	if combo >= 1 and not debuff[AS.Rupture].up then
+	if combo >= 1 and not debuff[AS.Rupture].up and 
+		not talents[AS.Subterfuge]
+	then
 		return AS.Rupture;
 	end
 
@@ -970,4 +982,3 @@ function Rogue:SubtletyStealthed()
 	-- shadowstrike;
 	return shadowStrike;
 end
-
